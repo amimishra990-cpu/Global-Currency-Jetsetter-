@@ -5,6 +5,8 @@ const amountInput = document.getElementById("amount");
 const baseCurrencySelect = document.getElementById("baseCurrency");
 const searchCurrencyInput = document.getElementById("searchCurrency");
 const sortBySelect = document.getElementById("sortBy");
+const resultFilterSelect = document.getElementById("resultFilter");
+const showCountSelect = document.getElementById("showCount");
 const currencyList = document.getElementById("currencyList");
 const convertBtn = document.getElementById("convertBtn");
 const clearBtn = document.getElementById("clearBtn");
@@ -12,10 +14,13 @@ const loadingEl = document.getElementById("loading");
 const errorEl = document.getElementById("error");
 const resultsEl = document.getElementById("results");
 const lastUpdatedEl = document.getElementById("lastUpdated");
+const themeToggleBtn = document.getElementById("themeToggle");
 
 let allCurrencies = {};
 let filteredCurrencies = [];
 let selectedTargets = ["INR", "EUR", "JPY"];
+let latestResults = [];
+let favorites = JSON.parse(localStorage.getItem("favoriteCurrencies")) || [];
 
 function showLoading() {
   loadingEl.classList.remove("hidden");
@@ -36,12 +41,34 @@ function clearError() {
   errorEl.textContent = "";
 }
 
+function saveFavorites() {
+  localStorage.setItem("favoriteCurrencies", JSON.stringify(favorites));
+}
+
+function loadTheme() {
+  const savedTheme = localStorage.getItem("theme");
+  if (savedTheme === "light") {
+    document.body.classList.add("light-mode");
+  }
+}
+
+function toggleTheme() {
+  document.body.classList.toggle("light-mode");
+
+  if (document.body.classList.contains("light-mode")) {
+    localStorage.setItem("theme", "light");
+  } else {
+    localStorage.setItem("theme", "dark");
+  }
+}
+
 async function fetchCurrencies() {
   showLoading();
   clearError();
 
   try {
     const response = await fetch(currenciesUrl);
+
     if (!response.ok) {
       throw new Error("Could not load currencies.");
     }
@@ -62,21 +89,31 @@ async function fetchCurrencies() {
 function populateBaseCurrencies(currencies) {
   baseCurrencySelect.innerHTML = "";
 
-  Object.entries(currencies).forEach(([code, name]) => {
-    const option = document.createElement("option");
-    option.value = code;
-    option.textContent = `${code} - ${name}`;
-    if (code === "USD") option.selected = true;
-    baseCurrencySelect.appendChild(option);
-  });
+  Object.entries(currencies)
+    .sort((a, b) => a[0].localeCompare(b[0]))
+    .forEach(([code, name]) => {
+      const option = document.createElement("option");
+      option.value = code;
+      option.textContent = `${code} - ${name}`;
+
+      if (code === "USD") {
+        option.selected = true;
+      }
+
+      baseCurrencySelect.appendChild(option);
+    });
 }
 
 function renderCurrencyCheckboxes(currencyEntries) {
   const base = baseCurrencySelect.value;
-
   currencyList.innerHTML = "";
 
   const visibleCurrencies = currencyEntries.filter(([code]) => code !== base);
+
+  if (visibleCurrencies.length === 0) {
+    currencyList.innerHTML = `<div class="empty-state">No matching currencies found.</div>`;
+    return;
+  }
 
   visibleCurrencies.forEach(([code, name]) => {
     const wrapper = document.createElement("label");
@@ -132,10 +169,12 @@ function getLast7BusinessDates() {
     d.setDate(today.getDate() - i);
 
     const day = d.getDay();
+
     if (day !== 0 && day !== 6) {
       dates.push(d);
       count++;
     }
+
     i++;
   }
 
@@ -155,13 +194,17 @@ async function fetchHistoricalRates(base, symbol) {
   const url = `https://api.frankfurter.dev/v1/${from}..${to}?base=${base}&symbols=${symbol}`;
 
   const response = await fetch(url);
+
   if (!response.ok) {
     throw new Error(`Could not fetch history for ${symbol}`);
   }
 
   const data = await response.json();
 
-  const values = Object.values(data.rates || {}).map(dayRate => dayRate[symbol]).filter(Boolean);
+  const values = Object.values(data.rates || [])
+    .map(dayRate => dayRate[symbol])
+    .filter(Boolean);
+
   return values;
 }
 
@@ -190,24 +233,55 @@ function createSparkline(values) {
 
 function sortResults(data) {
   const sortType = sortBySelect.value;
+  let newData = [...data];
 
   if (sortType === "code") {
-    return data.sort((a, b) => a.code.localeCompare(b.code));
+    newData.sort((a, b) => a.code.localeCompare(b.code));
+  } else if (sortType === "alpha") {
+    newData.sort((a, b) => a.name.localeCompare(b.name));
+  } else if (sortType === "value-asc") {
+    newData.sort((a, b) => a.value - b.value);
+  } else if (sortType === "value-desc") {
+    newData.sort((a, b) => b.value - a.value);
   }
 
-  if (sortType === "alpha") {
-    return data.sort((a, b) => a.name.localeCompare(b.name));
+  return newData;
+}
+
+function filterResults(data) {
+  if (!resultFilterSelect) {
+    return data;
   }
 
-  if (sortType === "value-asc") {
-    return data.sort((a, b) => a.value - b.value);
+  const filterType = resultFilterSelect.value;
+
+  if (filterType === "favorites") {
+    return data.filter(item => favorites.includes(item.code));
   }
 
-  if (sortType === "value-desc") {
-    return data.sort((a, b) => b.value - a.value);
+  if (filterType === "high") {
+    return data.filter(item => item.value > 1000);
+  }
+
+  if (filterType === "low") {
+    return data.filter(item => item.value < 1000);
   }
 
   return data;
+}
+
+function limitResults(data) {
+  if (!showCountSelect) {
+    return data;
+  }
+
+  const count = showCountSelect.value;
+
+  if (count === "all") {
+    return data;
+  }
+
+  return data.slice(0, Number(count));
 }
 
 async function convertCurrencies() {
@@ -245,6 +319,7 @@ async function convertCurrencies() {
     let resultsData = await Promise.all(
       Object.entries(rates).map(async ([code, rate]) => {
         let history = [];
+
         try {
           history = await fetchHistoricalRates(base, code);
         } catch (error) {
@@ -252,17 +327,17 @@ async function convertCurrencies() {
         }
 
         return {
-          code,
+          code: code,
           name: allCurrencies[code] || code,
           value: amount * rate,
-          rate,
-          history
+          rate: rate,
+          history: history
         };
       })
     );
 
-    resultsData = sortResults(resultsData);
-    renderResults(resultsData, amount, base, data.date);
+    latestResults = resultsData;
+    updateResults(amount, base, data.date);
   } catch (error) {
     showError(error.message || "Conversion failed.");
   } finally {
@@ -270,9 +345,20 @@ async function convertCurrencies() {
   }
 }
 
+function updateResults(amount, base, date) {
+  let data = [...latestResults];
+
+  data = filterResults(data);
+  data = sortResults(data);
+  data = limitResults(data);
+
+  renderResults(data, amount, base, date);
+}
+
 function renderResults(results, amount, base, date) {
   if (!results.length) {
     resultsEl.innerHTML = `<div class="empty-state">No results found.</div>`;
+    lastUpdatedEl.textContent = "";
     return;
   }
 
@@ -280,6 +366,8 @@ function renderResults(results, amount, base, date) {
 
   resultsEl.innerHTML = results
     .map(item => {
+      const isFavorite = favorites.includes(item.code);
+
       return `
         <div class="result-card">
           <h3>${item.name}</h3>
@@ -288,17 +376,55 @@ function renderResults(results, amount, base, date) {
           <p>${amount} ${base} × ${item.rate.toFixed(4)}</p>
           ${createSparkline(item.history)}
           <p class="note">Last 7-day trend</p>
+          <div class="card-actions">
+            <button class="small-btn favorite-btn ${isFavorite ? "active" : ""}" data-code="${item.code}">
+              ${isFavorite ? "Remove Favorite" : "Add Favorite"}
+            </button>
+          </div>
         </div>
       `;
     })
     .join("");
+
+  addFavoriteEvents(amount, base, date);
+}
+
+function addFavoriteEvents(amount, base, date) {
+  const buttons = document.querySelectorAll(".favorite-btn");
+
+  buttons.forEach(button => {
+    button.addEventListener("click", () => {
+      const code = button.dataset.code;
+
+      if (favorites.includes(code)) {
+        favorites = favorites.filter(item => item !== code);
+      } else {
+        favorites.push(code);
+      }
+
+      saveFavorites();
+      updateResults(amount, base, date);
+    });
+  });
 }
 
 function clearSelections() {
   selectedTargets = [];
   searchCurrencyInput.value = "";
+
+  if (resultFilterSelect) {
+    resultFilterSelect.value = "all";
+  }
+
+  if (showCountSelect) {
+    showCountSelect.value = "all";
+  }
+
+  sortBySelect.value = "code";
+
   filteredCurrencies = Object.entries(allCurrencies);
   renderCurrencyCheckboxes(filteredCurrencies);
+
   resultsEl.innerHTML = `<div class="empty-state">Select currencies and click convert.</div>`;
   lastUpdatedEl.textContent = "";
   clearError();
@@ -310,14 +436,44 @@ baseCurrencySelect.addEventListener("change", () => {
 });
 
 searchCurrencyInput.addEventListener("input", handleSearch);
+
 sortBySelect.addEventListener("change", () => {
-  const cardsExist = resultsEl.children.length > 0;
-  if (cardsExist && !resultsEl.querySelector(".empty-state")) {
+  const cardsExist = latestResults.length > 0;
+  if (cardsExist) {
     convertCurrencies();
   }
 });
+
+if (resultFilterSelect) {
+  resultFilterSelect.addEventListener("change", () => {
+    if (latestResults.length > 0) {
+      const amount = parseFloat(amountInput.value);
+      const base = baseCurrencySelect.value;
+      const date = lastUpdatedEl.textContent.replace("Last Updated: ", "");
+      updateResults(amount, base, date);
+    }
+  });
+}
+
+if (showCountSelect) {
+  showCountSelect.addEventListener("change", () => {
+    if (latestResults.length > 0) {
+      const amount = parseFloat(amountInput.value);
+      const base = baseCurrencySelect.value;
+      const date = lastUpdatedEl.textContent.replace("Last Updated: ", "");
+      updateResults(amount, base, date);
+    }
+  });
+}
+
 convertBtn.addEventListener("click", convertCurrencies);
 clearBtn.addEventListener("click", clearSelections);
+
+if (themeToggleBtn) {
+  themeToggleBtn.addEventListener("click", toggleTheme);
+}
+
+loadTheme();
 
 fetchCurrencies().then(() => {
   resultsEl.innerHTML = `<div class="empty-state">Select currencies and click convert.</div>`;

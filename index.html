@@ -9,8 +9,12 @@
 <body>
   <div class="app">
     <header class="hero">
-      <h1>Global Currency Jetsetter</h1>
-      <p>Compare your money across multiple countries at once</p>
+      <div>
+        <h1>Global Currency Jetsetter</h1>
+        <p>Compare your money across multiple countries in one place</p>
+      </div>
+
+      <button id="themeToggle" class="theme-btn">Toggle Theme</button>
     </header>
 
     <main class="container">
@@ -41,6 +45,26 @@
             <option value="value-desc">Converted Value: High to Low</option>
             <option value="value-asc">Converted Value: Low to High</option>
             <option value="alpha">Alphabetical Name</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="resultFilter">Filter Results</label>
+          <select id="resultFilter">
+            <option value="all">All Results</option>
+            <option value="favorites">Favorites Only</option>
+            <option value="high">Above 1000</option>
+            <option value="low">Below 1000</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="showCount">Results Per Row Hint</label>
+          <select id="showCount">
+            <option value="all">Show All</option>
+            <option value="6">Top 6</option>
+            <option value="9">Top 9</option>
+            <option value="12">Top 12</option>
           </select>
         </div>
 
